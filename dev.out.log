@@ -1,0 +1,14 @@
+
+> form-studio@0.1.0 dev
+> next dev --port 3000
+
+▲ Next.js 16.1.6 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.29.72:3000
+- Environments: .env
+
+✓ Starting...
+Creating turbopack project { dir: 'D:\\ai for every one', testMode: true }
+✓ Ready in 1063ms
+ GET / 200 in 534ms (compile: 261ms, render: 273ms)
+ GET /api/forms 200 in 1289ms (compile: 138ms, render: 1151ms)

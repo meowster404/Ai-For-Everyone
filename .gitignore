@@ -1,0 +1,15 @@
+# v0 runtime files
+__v0_runtime_loader.js
+__v0_devtools.tsx
+__v0_jsx-dev-runtime.ts
+
+# Common ignores
+node_modules/
+.node_modules_locked/
+.next/
+# environment files (keep credentials out of repo)
+.env
+.env.*
+.env*.local
+.DS_Store
+.data/
