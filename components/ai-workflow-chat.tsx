@@ -1,18 +1,62 @@
 "use client"
 
-import { useState, useRef, useEffect } from 'react'
-import { Button } from '@/components/ui/button'
+import { useEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 
-interface Message {
-  role: 'user' | 'assistant'
-  text: string
-  isProcessing?: boolean
+import { Button } from '@/components/ui/button'
+
+type FormFieldType =
+  | 'text'
+  | 'email'
+  | 'number'
+  | 'textarea'
+  | 'checkbox'
+  | 'radio'
+  | 'select'
+  | 'date'
+  | 'time'
+  | 'phone'
+  | 'link'
+  | 'upload'
+  | 'rating'
+  | 'payment'
+  | 'signature'
+  | 'linear-scale'
+  | 'matrix'
+  | 'ranking'
+
+type FormField = {
+  id: string
+  label: string
+  type: FormFieldType
+  required: boolean
+  options?: string[]
 }
 
-interface AIWorkflowChatProps {
+type AIFormResult = {
+  name: string
+  description: string
+  fields: FormField[]
+  generatedWith?: string
+}
+
+type Message = {
+  role: 'user' | 'assistant'
+  text: string
+}
+
+type AIWorkflowChatProps = {
   onClose: () => void
-  onFormCreated: (form: any) => void
+  onFormCreated: (form: {
+    id?: string
+    name: string
+    description: string
+    submissionCount?: number
+    createdAt?: string
+    eventId?: string
+    fields?: FormField[]
+    formConfig?: Record<string, unknown>
+  }) => void
 }
 
 export function AIWorkflowChat({ onClose, onFormCreated }: AIWorkflowChatProps) {
@@ -21,139 +65,119 @@ export function AIWorkflowChat({ onClose, onFormCreated }: AIWorkflowChatProps) 
   const [isProcessing, setIsProcessing] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }
-
   useEffect(() => {
-    scrollToBottom()
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  const handleSend = async () => {
-    if (!input.trim() || isProcessing) return
+  const appendMessage = (message: Message) => {
+    setMessages((prev) => [...prev, message])
+  }
 
-    const userMsg: Message = { role: 'user', text: input }
-    setMessages(prev => [...prev, userMsg])
-    const userInput = input
+  const handleSend = async () => {
+    const userInput = input.trim()
+    if (!userInput || isProcessing) return
+
+    appendMessage({ role: 'user', text: userInput })
     setInput('')
     setIsProcessing(true)
 
-    // Add processing message
-    setMessages(prev => [...prev, { 
-      role: 'assistant', 
-      text: '🔄 Processing your request...', 
-      isProcessing: true 
-    }])
+    appendMessage({ role: 'assistant', text: 'Analyzing requirements and building your form...' })
 
-    // Simulate workflow steps
-    await new Promise(r => setTimeout(r, 800))
+    try {
+      const response = await fetch('/api/generate-form', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: userInput,
+          maxFields: 12,
+        }),
+      })
 
-    setMessages(prev => {
-      const updated = [...prev]
-      updated[updated.length - 1] = { 
-        role: 'assistant', 
-        text: '📋 Analyzing form requirements...' 
+      const json = await response.json()
+      if (!response.ok || !json.success || !json.data) {
+        throw new Error(json.error ?? 'AI form generation failed')
       }
-      return updated
-    })
 
-    await new Promise(r => setTimeout(r, 800))
+      const data = json.data as AIFormResult
+      appendMessage({
+        role: 'assistant',
+        text: `Form ready: "${data.name}" with ${data.fields.length} fields. Opening editor...`,
+      })
 
-    setMessages(prev => {
-      const updated = [...prev]
-      updated[updated.length - 1] = { 
-        role: 'assistant', 
-        text: '🏗️ Structuring form fields...' 
-      }
-      return updated
-    })
-
-    await new Promise(r => setTimeout(r, 800))
-
-    setMessages(prev => {
-      const updated = [...prev]
-      updated[updated.length - 1] = { 
-        role: 'assistant', 
-        text: '✅ Form created successfully!' 
-      }
-      return updated
-    })
-
-    setIsProcessing(false)
-
-    // Create the form
-    const newForm = {
-      id: String(Date.now()),
-      name: extractFormName(userInput),
-      description: userInput,
-      submissionCount: 0,
-      createdAt: new Date().toISOString(),
-      eventId: 'event-' + Date.now(),
+      setTimeout(() => {
+        onFormCreated({
+          name: data.name,
+          description: data.description,
+          eventId: '',
+          fields: data.fields,
+          formConfig: {
+            generatedWithAI: true,
+            aiPrompt: userInput,
+            aiSource: data.generatedWith || 'fallback',
+          },
+        })
+      }, 350)
+    } catch (error) {
+      appendMessage({
+        role: 'assistant',
+        text: error instanceof Error ? error.message : 'AI form generation failed. Please try again.',
+      })
+    } finally {
+      setIsProcessing(false)
     }
-
-    // Auto-close after 1 second
-    setTimeout(() => {
-      onFormCreated(newForm)
-    }, 1000)
   }
 
-  const extractFormName = (text: string): string => {
-    const words = text.split(' ').slice(0, 3).join(' ')
-    return words || 'New Form'
-  }
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && !isProcessing) {
-      e.preventDefault()
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter' && !isProcessing) {
+      event.preventDefault()
       handleSend()
     }
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="w-96 bg-card rounded-lg shadow-xl flex flex-col h-96 border border-border">
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-border">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="flex h-[28rem] w-[min(95vw,24rem)] flex-col rounded-lg border border-border bg-card shadow-xl">
+        <div className="flex items-center justify-between border-b border-border p-4">
           <h3 className="font-semibold text-foreground">Create Form with AI</h3>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
             <X size={20} />
           </button>
         </div>
 
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {messages.length === 0 && (
-            <div className="text-center text-muted-foreground text-sm py-8">
+        <div className="flex-1 space-y-4 overflow-y-auto p-4">
+          {messages.length === 0 ? (
+            <div className="py-8 text-center text-sm text-muted-foreground">
               <p>Describe the form you want to create.</p>
-              <p className="text-xs mt-2">Example: "Event registration form with name, email, and attendance"</p>
+              <p className="mt-2 text-xs">Example: Event registration form with name, email, and attendance</p>
             </div>
-          )}
-          {messages.map((m, idx) => (
+          ) : null}
+
+          {messages.map((message, index) => (
             <div
-              key={idx}
-              className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              key={`${message.role}-${index}`}
+              className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <span
-                className={`inline-block px-3 py-2 rounded max-w-[85%] text-sm ${
-                  m.role === 'user'
+                className={`inline-block max-w-[85%] rounded px-3 py-2 text-sm ${
+                  message.role === 'user'
                     ? 'bg-primary text-primary-foreground'
                     : 'bg-muted text-muted-foreground'
                 }`}
               >
-                {m.text}
+                {message.text}
               </span>
             </div>
           ))}
+
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input */}
-        <div className="p-4 border-t border-border flex gap-2">
+        <div className="flex gap-2 border-t border-border p-4">
           <input
             type="text"
-            className="flex-1 px-3 py-2 border rounded-lg bg-background text-foreground text-sm placeholder:text-muted-foreground"
+            className="flex-1 rounded-lg border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground"
             value={input}
-            onChange={e => setInput(e.target.value)}
+            onChange={(event) => setInput(event.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Describe your form..."
             disabled={isProcessing}
@@ -164,7 +188,7 @@ export function AIWorkflowChat({ onClose, onFormCreated }: AIWorkflowChatProps) 
             size="sm"
             className="px-3"
           >
-            Send
+            {isProcessing ? 'Working...' : 'Send'}
           </Button>
         </div>
       </div>

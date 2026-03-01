@@ -1,3 +1,4 @@
+import { generateJson } from '@/lib/ai'
 import {
   applyRequestGuards,
   jsonError,
@@ -12,6 +13,11 @@ type GeneratePostBody = {
   audience?: string
   topic?: string
   keywords?: string
+}
+
+type AIPostDraft = {
+  post?: unknown
+  hashtags?: unknown
 }
 
 function toHashtag(value: string) {
@@ -64,7 +70,7 @@ export async function POST(request: Request) {
     .filter(Boolean)
     .slice(0, 8)
 
-  const generated = [
+  const fallbackPost = [
     `If you're speaking to ${audience}, this matters now:`,
     '',
     `${topic}.`,
@@ -74,10 +80,39 @@ export async function POST(request: Request) {
     'Would you test this in your next campaign?',
   ].join('\n')
 
-  const post = trimForPlatform(platform, generated)
-  const hashtags = Array.from(
-    new Set([toHashtag(topic), ...keyList.map(toHashtag), toHashtag(platform), '#AIGenerated'].filter(Boolean))
+  const fallbackHashtags = Array.from(
+    new Set(
+      [toHashtag(topic), ...keyList.map(toHashtag), toHashtag(platform), '#AIGenerated'].filter(Boolean)
+    )
   ).slice(0, 6)
+
+  const aiDraft = await generateJson<AIPostDraft>({
+    system:
+      'You write short social media posts. Return strict JSON with keys post and hashtags. hashtags must be an array of hashtag strings.',
+    user: JSON.stringify({
+      platform,
+      tone,
+      audience,
+      topic,
+      keywords: keyList,
+      constraints: {
+        maxCharactersForX: 280,
+      },
+    }),
+    temperature: 0.65,
+    maxTokens: 800,
+  })
+
+  const aiPost = typeof aiDraft?.post === 'string' ? aiDraft.post.trim() : ''
+  const aiHashtags = Array.isArray(aiDraft?.hashtags)
+    ? aiDraft.hashtags
+        .map((item) => toHashtag(sanitizeSingleLine(item, 40)))
+        .filter(Boolean)
+        .slice(0, 6)
+    : []
+
+  const post = trimForPlatform(platform, (aiPost || fallbackPost).slice(0, 2000))
+  const hashtags = aiHashtags.length ? Array.from(new Set(aiHashtags)) : fallbackHashtags
 
   return jsonSuccess({
     post,

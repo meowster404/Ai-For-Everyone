@@ -14,7 +14,8 @@ Single-project Next.js app with:
 - Next.js (App Router)
 - React + TypeScript
 - Tailwind CSS
-- Supabase/Postgres backend
+- Supabase/Postgres backend (with automatic local fallback)
+- OpenAI-compatible AI generation
 
 ## Project Structure
 
@@ -46,6 +47,16 @@ npm run dev
 
 Open `http://localhost:3000`.
 
+## AI Setup
+
+Set these variables in your `.env` for real AI generation:
+
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL` (default `gpt-4o-mini`)
+- `OPENAI_BASE_URL` (default `https://api.openai.com/v1`)
+
+If AI is not configured, all generators still work using deterministic fallbacks.
+
 ## Database Setup
 
 Option 1 (direct DB URL):
@@ -61,6 +72,9 @@ node run-sql-supabase.js
 ```
 
 If RPC is unavailable, run `scripts/schema.sql` in the Supabase SQL Editor.
+
+If `DATABASE_URL`/`DIRECT_URL` is unavailable, API routes automatically fall back to a local in-memory store.  
+Set `USE_PERSISTENT_STORE=true` to persist that fallback store in `./.data/store.json`.
 
 ## Scripts
 
@@ -94,6 +108,7 @@ If RPC is unavailable, run `scripts/schema.sql` in the Supabase SQL Editor.
 - `POST /api/forms/[id]/sheet`
 - `GET /api/submissions?formId=<id>`
 - `POST /api/submissions`
+- `POST /api/generate-form`
 - `POST /api/generate-invitation`
 - `POST /api/generate-post`
 - `POST /api/generate-timeline`

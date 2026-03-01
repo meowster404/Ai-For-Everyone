@@ -1,3 +1,4 @@
+import { generateJson } from '@/lib/ai'
 import {
   applyRequestGuards,
   jsonError,
@@ -21,6 +22,10 @@ type ReminderItem = {
   channels: string[]
 }
 
+type AIReminderDraft = {
+  items?: unknown
+}
+
 function addDays(baseDate: Date, days: number) {
   const next = new Date(baseDate)
   next.setDate(next.getDate() + days)
@@ -29,6 +34,51 @@ function addDays(baseDate: Date, days: number) {
 
 function asISODate(value: Date) {
   return value.toISOString().slice(0, 10)
+}
+
+function normalizeAiItems(value: unknown, fallbackChannels: string[]): ReminderItem[] {
+  if (!Array.isArray(value)) return []
+
+  const normalized: ReminderItem[] = []
+
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== 'object') continue
+
+    const row = candidate as {
+      stage?: unknown
+      timing?: unknown
+      date?: unknown
+      message?: unknown
+      channels?: unknown
+    }
+
+    const stage = sanitizeSingleLine(row.stage, 80)
+    const timing = sanitizeSingleLine(row.timing, 40)
+    const date = sanitizeSingleLine(row.date, 10)
+    const message = sanitizeSingleLine(row.message, 240)
+
+    if (!stage || !timing || !message) continue
+    if (!parseISODateOnly(date)) continue
+
+    const channels = Array.isArray(row.channels)
+      ? row.channels
+          .map((item) => sanitizeSingleLine(item, 20).toLowerCase())
+          .filter(Boolean)
+          .slice(0, 6)
+      : []
+
+    normalized.push({
+      stage,
+      timing,
+      date,
+      message,
+      channels: channels.length ? channels : fallbackChannels,
+    })
+
+    if (normalized.length >= 20) break
+  }
+
+  return normalized
 }
 
 export async function POST(request: Request) {
@@ -75,7 +125,7 @@ export async function POST(request: Request) {
     { stage: 'Thank-you follow-up', offsetDays: 1 },
   ]
 
-  const items: ReminderItem[] = reminderTemplate.map((item) => {
+  const fallbackItems: ReminderItem[] = reminderTemplate.map((item) => {
     const date = addDays(eventDate, item.offsetDays)
     const timing =
       item.offsetDays === 0
@@ -92,6 +142,22 @@ export async function POST(request: Request) {
       channels,
     }
   })
+
+  const aiDraft = await generateJson<AIReminderDraft>({
+    system:
+      'You generate event reminder schedules. Return strict JSON with one key: items. Each item must include stage, timing, date (YYYY-MM-DD), message, channels (string array). No markdown.',
+    user: JSON.stringify({
+      eventName,
+      eventDate: asISODate(eventDate),
+      channels,
+      requiredStages: reminderTemplate.map((item) => item.stage),
+    }),
+    temperature: 0.4,
+    maxTokens: 1000,
+  })
+
+  const aiItems = normalizeAiItems(aiDraft?.items, channels)
+  const items = aiItems.length ? aiItems : fallbackItems
 
   return jsonSuccess({
     eventName,

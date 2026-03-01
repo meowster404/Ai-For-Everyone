@@ -1,3 +1,4 @@
+import { generateJson } from '@/lib/ai'
 import {
   applyRequestGuards,
   jsonError,
@@ -23,6 +24,11 @@ type TimelineItem = {
   summary: string
 }
 
+type AITimelineDraft = {
+  projectName?: unknown
+  items?: unknown
+}
+
 function parseMilestones(milestones: string) {
   return milestones
     .split('\n')
@@ -38,6 +44,57 @@ function addWeeks(baseDate: Date, weeks: number) {
 
 function asISODate(value: Date) {
   return value.toISOString().slice(0, 10)
+}
+
+function normalizeAiItems(
+  value: unknown,
+  projectName: string,
+  startDate: Date,
+  durationWeeks: number
+): TimelineItem[] {
+  if (!Array.isArray(value)) return []
+
+  const normalized: TimelineItem[] = []
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== 'object') continue
+
+    const row = candidate as {
+      week?: unknown
+      title?: unknown
+      date?: unknown
+      summary?: unknown
+    }
+
+    const weekRaw = Number(row.week)
+    const week = Number.isFinite(weekRaw)
+      ? Math.max(1, Math.min(durationWeeks, Math.floor(weekRaw)))
+      : normalized.length + 1
+
+    const title = sanitizeSingleLine(row.title, 140)
+    if (!title) continue
+
+    const parsedDate = parseISODateOnly(sanitizeSingleLine(row.date, 10))
+    const date = parsedDate ? asISODate(parsedDate) : asISODate(addWeeks(startDate, week - 1))
+    const summary = sanitizeSingleLine(row.summary, 260) || `${title} for ${projectName}.`
+
+    normalized.push({
+      week,
+      title,
+      date,
+      summary,
+    })
+
+    if (normalized.length >= 30) break
+  }
+
+  const dedupedByWeek = new Map<number, TimelineItem>()
+  for (const item of normalized) {
+    if (!dedupedByWeek.has(item.week)) {
+      dedupedByWeek.set(item.week, item)
+    }
+  }
+
+  return Array.from(dedupedByWeek.values()).sort((a, b) => a.week - b.week)
 }
 
 export async function POST(request: Request) {
@@ -84,7 +141,7 @@ export async function POST(request: Request) {
   const milestones = rawMilestones.length ? parseMilestones(rawMilestones.join('\n')) : defaultMilestones
   const interval = Math.max(1, Math.floor(durationWeeks / milestones.length))
 
-  const items: TimelineItem[] = milestones.map((title, index) => {
+  const fallbackItems: TimelineItem[] = milestones.map((title, index) => {
     const week = Math.min(durationWeeks, 1 + index * interval)
     const date = asISODate(addWeeks(startDate, week - 1))
     return {
@@ -95,7 +152,32 @@ export async function POST(request: Request) {
     }
   })
 
-  if (items[items.length - 1].week !== durationWeeks) {
+  if (fallbackItems[fallbackItems.length - 1].week !== durationWeeks) {
+    fallbackItems.push({
+      week: durationWeeks,
+      title: 'Final review and handoff',
+      date: asISODate(addWeeks(startDate, durationWeeks - 1)),
+      summary: `Finalize outcomes and handoff for ${projectName}.`,
+    })
+  }
+
+  const aiDraft = await generateJson<AITimelineDraft>({
+    system:
+      'You generate project timelines. Return strict JSON with keys projectName and items. items must be an array of objects with week (number), title (string), date (YYYY-MM-DD), summary (string). No markdown.',
+    user: JSON.stringify({
+      projectName,
+      startDate: asISODate(startDate),
+      durationWeeks,
+      milestones,
+    }),
+    temperature: 0.45,
+    maxTokens: 1200,
+  })
+
+  const aiItems = normalizeAiItems(aiDraft?.items, projectName, startDate, durationWeeks)
+  const items = aiItems.length ? aiItems : fallbackItems
+
+  if (items[items.length - 1]?.week !== durationWeeks) {
     items.push({
       week: durationWeeks,
       title: 'Final review and handoff',
@@ -105,7 +187,7 @@ export async function POST(request: Request) {
   }
 
   return jsonSuccess({
-    projectName,
+    projectName: sanitizeSingleLine(aiDraft?.projectName, 120) || projectName,
     items,
   })
 }

@@ -23,6 +23,34 @@ import { AIWorkflowChat } from '@/components/ai-workflow-chat'
 import { FormCreationModal } from '@/components/form-creation-modal'
 import { useRouter } from 'next/navigation'
 
+type FormFieldType =
+  | 'text'
+  | 'email'
+  | 'number'
+  | 'textarea'
+  | 'checkbox'
+  | 'radio'
+  | 'select'
+  | 'date'
+  | 'time'
+  | 'phone'
+  | 'link'
+  | 'upload'
+  | 'rating'
+  | 'payment'
+  | 'signature'
+  | 'linear-scale'
+  | 'matrix'
+  | 'ranking'
+
+type FormField = {
+  id: string
+  label: string
+  type: FormFieldType
+  required: boolean
+  options?: string[]
+}
+
 interface Form {
   id: string
   name: string
@@ -30,6 +58,19 @@ interface Form {
   submissionCount: number
   createdAt: string
   eventId: string
+}
+
+interface FormDraft {
+  id?: string
+  name: string
+  description: string
+  eventId?: string
+  fields?: FormField[]
+  formConfig?: Record<string, unknown>
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
 }
 
 export default function DashboardPage() {
@@ -54,6 +95,8 @@ export default function DashboardPage() {
           submissionCount: row.submissionCount ?? row.submission_count ?? 0,
           createdAt: row.createdAt || row.created_at || new Date().toISOString(),
           eventId: row.eventId || row.event_id || '',
+          fields: Array.isArray(row.fields) ? row.fields : [],
+          formConfig: row.formConfig || row.form_config || {},
         }))
         setForms(mapped)
       } catch (error) {
@@ -75,14 +118,31 @@ export default function DashboardPage() {
     setForms((prev) => prev.filter((form: Form) => form.id !== id))
   }
 
-  const createFormAndOpenEditor = async (draft: Form) => {
-    const payload = {
-      id: draft.id,
-      name: draft.name || 'Untitled Form',
-      description: draft.description || '',
+  const createFormAndOpenEditor = async (draft: FormDraft) => {
+    const fallbackName = draft.name || 'Untitled Form'
+    const fallbackDescription = draft.description || ''
+    const fallbackFields = Array.isArray(draft.fields) ? draft.fields : []
+    const fallbackFormConfig =
+      draft.formConfig && typeof draft.formConfig === 'object' ? draft.formConfig : {}
+
+    const payload: {
+      id?: string
+      name: string
+      description: string
+      eventId: string | null
+      fields: FormField[]
+      formConfig: Record<string, unknown>
+    } = {
+      name: fallbackName,
+      description: fallbackDescription,
       eventId: draft.eventId || null,
-      fields: [],
+      fields: fallbackFields,
+      formConfig: fallbackFormConfig,
     }
+    if (draft.id && isUuid(draft.id)) {
+      payload.id = draft.id
+    }
+
     const res = await fetch('/api/forms', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -95,8 +155,8 @@ export default function DashboardPage() {
 
     const created: Form = {
       id: json.data.id,
-      name: json.data.name || payload.name,
-      description: json.data.description || payload.description,
+      name: json.data.name || fallbackName,
+      description: json.data.description || fallbackDescription,
       submissionCount: json.data.submissionCount ?? json.data.submission_count ?? 0,
       createdAt: json.data.createdAt || json.data.created_at || new Date().toISOString(),
       eventId: json.data.eventId || json.data.event_id || '',
@@ -106,12 +166,21 @@ export default function DashboardPage() {
     router.push(`/forms/${created.id}/edit`)
   }
 
-  const handleFormCreated = async (newForm: Form) => {
+  const handleFormCreated = async (newForm: FormDraft) => {
     try {
       await createFormAndOpenEditor(newForm)
     } catch (error) {
       console.error('Failed to create form from AI:', error)
-      setForms((prev) => [...prev, newForm])
+      setForms((prev) => [
+        ...prev,
+        {
+          ...newForm,
+          id: newForm.id || crypto.randomUUID(),
+          eventId: newForm.eventId || '',
+          createdAt: new Date().toISOString(),
+          submissionCount: 0,
+        },
+      ])
     }
     setShowAIChat(false)
   }
@@ -123,20 +192,29 @@ export default function DashboardPage() {
 
   const handleCreateManually = async () => {
     setShowCreationModal(false)
-    const newForm: Form = {
+    const newForm: FormDraft = {
       id: crypto.randomUUID(),
       name: 'Untitled Form',
       description: '',
-      submissionCount: 0,
-      createdAt: new Date().toISOString(),
       eventId: '',
     }
     try {
       await createFormAndOpenEditor(newForm)
     } catch (error) {
       console.error('Failed to create manual form:', error)
-      setForms((prev) => [...prev, newForm])
-      router.push(`/forms/${newForm.id}/edit`)
+      const fallbackId = newForm.id || crypto.randomUUID()
+      setForms((prev) => [
+        ...prev,
+        {
+          id: fallbackId,
+          name: newForm.name,
+          description: newForm.description,
+          eventId: newForm.eventId || '',
+          createdAt: new Date().toISOString(),
+          submissionCount: 0,
+        },
+      ])
+      router.push(`/forms/${fallbackId}/edit`)
     }
   }
 

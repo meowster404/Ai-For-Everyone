@@ -1,3 +1,4 @@
+import { generateJson } from '@/lib/ai'
 import {
   applyRequestGuards,
   jsonError,
@@ -15,6 +16,11 @@ type GenerateInvitationBody = {
   audience?: string
   rsvpLink?: string
   tone?: string
+}
+
+type AIInvitationDraft = {
+  subject?: unknown
+  body?: unknown
 }
 
 function formatDateLabel(date: Date) {
@@ -65,9 +71,9 @@ export async function POST(request: Request) {
         : `Hi ${audience},`
 
   const dateLabel = formatDateLabel(parsedDate)
-  const subject = `Invitation: ${eventName} on ${dateLabel}`
+  const fallbackSubject = `Invitation: ${eventName} on ${dateLabel}`
 
-  const bodyText = [
+  const fallbackBody = [
     greetingLine,
     '',
     `You are invited to ${eventName}.`,
@@ -83,9 +89,31 @@ export async function POST(request: Request) {
     '',
     `RSVP: ${rsvpLink}`,
     '',
-    `Best regards,`,
+    'Best regards,',
     hostName,
   ].join('\n')
+
+  const aiDraft = await generateJson<AIInvitationDraft>({
+    system:
+      'You write event invitation emails. Return strict JSON with keys subject and body only. Body must be plain text with line breaks and no markdown.',
+    user: JSON.stringify({
+      eventName,
+      hostName,
+      eventDate: dateLabel,
+      location,
+      audience,
+      rsvpLink,
+      tone,
+    }),
+    temperature: 0.5,
+    maxTokens: 900,
+  })
+
+  const subject = sanitizeSingleLine(aiDraft?.subject, 180) || fallbackSubject
+  const bodyText =
+    typeof aiDraft?.body === 'string' && aiDraft.body.trim().length > 0
+      ? aiDraft.body.replace(/\r\n/g, '\n').trim().slice(0, 6000)
+      : fallbackBody
 
   return jsonSuccess({
     subject,
